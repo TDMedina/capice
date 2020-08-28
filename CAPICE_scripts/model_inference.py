@@ -1,41 +1,68 @@
-import pandas as pd
-import numpy as np
-import pickle
+"""CAPICE Model Inference."""
 import argparse
+import pickle
+import yaml
+import numpy as np
+import pandas as pd
 import xgboost as xgb
 
 
-cadd_vars = ['Ref', 'Alt', 'Type', 'Length','GC', 'CpG', 'motifECount', 'motifEScoreChng', 'motifEHIPos',
-           'oAA', 'nAA', 'cDNApos', 'relcDNApos', 'CDSpos', 'relCDSpos', 'protPos', 'relProtPos', 'Domain', 'Dst2Splice',
-           'Dst2SplType', 'minDistTSS', 'minDistTSE', 'SIFTcat', 'SIFTval', 'PolyPhenCat', 'PolyPhenVal', 'priPhCons',
-           'mamPhCons', 'verPhCons', 'priPhyloP', 'mamPhyloP', 'verPhyloP', 'bStatistic', 'targetScan', 'mirSVR-Score',
-           'mirSVR-E', 'mirSVR-Aln', 'cHmmTssA', 'cHmmTssAFlnk', 'cHmmTxFlnk', 'cHmmTx', 'cHmmTxWk', 'cHmmEnhG',
-           'cHmmEnh', 'cHmmZnfRpts', 'cHmmHet', 'cHmmTssBiv', 'cHmmBivFlnk', 'cHmmEnhBiv', 'cHmmReprPC', 'cHmmReprPCWk',
-           'cHmmQuies', 'GerpRS', 'GerpRSpval', 'GerpN', 'GerpS', 'TFBS', 'TFBSPeaks', 'TFBSPeaksMax', 'tOverlapMotifs',
-           'motifDist', 'Segway', 'EncH3K27Ac', 'EncH3K4Me1', 'EncH3K4Me3', 'EncExp', 'EncNucleo', 'EncOCC', 'EncOCCombPVal',
-           'EncOCDNasePVal', 'EncOCFairePVal', 'EncOCpolIIPVal', 'EncOCctcfPVal', 'EncOCmycPVal', 'EncOCDNaseSig',
-           'EncOCFaireSig', 'EncOCpolIISig', 'EncOCctcfSig', 'EncOCmycSig', 'Grantham', 'Dist2Mutation', 'Freq100bp',
-           'Rare100bp', 'Sngl100bp', 'Freq1000bp', 'Rare1000bp', 'Sngl1000bp', 'Freq10000bp', 'Rare10000bp',
-           'Sngl10000bp', 'dbscSNV-ada_score', 'dbscSNV-rf_score']#, 'RawScore', 'PHRED', "Consequence"]
+cadd_vars = [
+    "Ref", "Alt", "Type", "Length", "GC", "CpG", "motifECount",
+    "motifEScoreChng", "motifEHIPos", "oAA", "nAA", "cDNApos", "relcDNApos",
+    "CDSpos", "relCDSpos", "protPos", "relProtPos", "Domain", "Dst2Splice",
+    "Dst2SplType", "minDistTSS", "minDistTSE", "SIFTcat", "SIFTval",
+    "PolyPhenCat", "PolyPhenVal", "priPhCons", "mamPhCons", "verPhCons",
+    "priPhyloP", "mamPhyloP", "verPhyloP", "bStatistic", "targetScan",
+    "mirSVR-Score", "mirSVR-E", "mirSVR-Aln", "cHmmTssA", "cHmmTssAFlnk",
+    "cHmmTxFlnk", "cHmmTx", "cHmmTxWk", "cHmmEnhG", "cHmmEnh", "cHmmZnfRpts",
+    "cHmmHet", "cHmmTssBiv", "cHmmBivFlnk", "cHmmEnhBiv", "cHmmReprPC",
+    "cHmmReprPCWk", "cHmmQuies", "GerpRS", "GerpRSpval", "GerpN", "GerpS",
+    "TFBS", "TFBSPeaks", "TFBSPeaksMax", "tOverlapMotifs", "motifDist",
+    "Segway", "EncH3K27Ac", "EncH3K4Me1", "EncH3K4Me3", "EncExp", "EncNucleo",
+    "EncOCC", "EncOCCombPVal", "EncOCDNasePVal", "EncOCFairePVal",
+    "EncOCpolIIPVal", "EncOCctcfPVal", "EncOCmycPVal", "EncOCDNaseSig",
+    "EncOCFaireSig", "EncOCpolIISig", "EncOCctcfSig", "EncOCmycSig",
+    "Grantham", "Dist2Mutation", "Freq100bp", "Rare100bp", "Sngl100bp",
+    "Freq1000bp", "Rare1000bp", "Sngl1000bp", "Freq10000bp", "Rare10000bp",
+    "Sngl10000bp", "dbscSNV-ada_score", "dbscSNV-rf_score",
+    # "RawScore", "PHRED", "Consequence"
+    ]
 
-impute_values = {'Ref':'N', 'Alt':'N', 'Consequence':'UNKNOWN', 'GC':0.42, 'CpG':0.02, 'motifECount':0,
-                 'motifEScoreChng':0, 'motifEHIPos':0,  'oAA': 'unknown', 'nAA': 'unknown', 'cDNApos': 0,
-                 'relcDNApos':0, 'CDSpos':0, 'relCDSpos':0, 'protPos':0, 'relProtPos':0, 'Domain':'UD', 'Dst2Splice':0,
-                 'Dst2SplType': 'unknown', 'minDistTSS':5.5, 'minDistTSE':5.5, 'SIFTcat':'UD', 'SIFTval': 0,
-                 'PolyPhenCat':'unknown', 'PolyPhenVal': 0, 'priPhCons':0.115, 'mamPhCons':0.079, 'verPhCons':0.094,
-                 'priPhyloP':-0.033, 'mamPhyloP':-0.038, 'verPhyloP':0.017, 'bStatistic':800, 'targetScan':0,
-                 'mirSVR-Score':0, 'mirSVR-E':0, 'mirSVR-Aln':0, 'cHmmTssA':0.0667, 'cHmmTssAFlnk':0.0667,
-                 'cHmmTxFlnk':0.0667, 'cHmmTx':0.0667, 'cHmmTxWk':0.0667, 'cHmmEnhG':0.0667, 'cHmmEnh':0.0667,
-                 'cHmmZnfRpts':0.0667, 'cHmmHet':0.667, 'cHmmTssBiv':0.667, 'cHmmBivFlnk':0.0667, 'cHmmEnhBiv':0.0667,
-                 'cHmmReprPC':0.0667, 'cHmmReprPCWk':0.0667, 'cHmmQuies':0.0667, 'GerpRS':0, 'GerpRSpval':0,
-                 'GerpN':1.91, 'GerpS':-0.2, 'TFBS':0, 'TFBSPeaks':0, 'TFBSPeaksMax':0, 'tOverlapMotifs':0,
-                 'motifDist':0, 'Segway':'unknown', 'EncH3K27Ac':0, 'EncH3K4Me1':0, 'EncH3K4Me3':0, 'EncExp':0,
-                 'EncNucleo':0, 'EncOCC':5, 'EncOCCombPVal':0, 'EncOCDNasePVal':0, 'EncOCFairePVal':0,
-                 'EncOCpolIIPVal':0, 'EncOCctcfPVal':0, 'EncOCmycPVal':0, 'EncOCDNaseSig':0, 'EncOCFaireSig':0,
-                 'EncOCpolIISig':0, 'EncOCctcfSig':0, 'EncOCmycSig':0, 'Grantham':0, 'Dist2Mutation':0,
-                 'Freq100bp':0, 'Rare100bp':0, 'Sngl100bp':0, 'Freq1000bp':0, 'Rare1000bp':0, 'Sngl1000bp':0,
-                 'Freq10000bp':0, 'Rare10000bp':0, 'Sngl10000bp':0, 'dbscSNV-ada_score':0,
-                 'dbscSNV-rf_score':0}
+impute_values = {
+    "Ref": "N", "Alt": "N", "Consequence": "UNKNOWN", "GC": 0.42, "CpG": 0.02,
+    "motifECount": 0, "motifEScoreChng": 0, "motifEHIPos": 0, "oAA": "unknown",
+    "nAA": "unknown", "cDNApos": 0, "relcDNApos": 0, "CDSpos": 0,
+    "relCDSpos": 0, "protPos": 0, "relProtPos": 0, "Domain": "UD",
+    "Dst2Splice": 0, "Dst2SplType": "unknown", "minDistTSS": 5.5,
+    "minDistTSE": 5.5, "SIFTcat": "UD", "SIFTval": 0, "PolyPhenCat": "unknown",
+    "PolyPhenVal": 0, "priPhCons": 0.115, "mamPhCons": 0.079,
+    "verPhCons": 0.094, "priPhyloP": -0.033, "mamPhyloP": -0.038,
+    "verPhyloP": 0.017, "bStatistic": 800, "targetScan": 0, "mirSVR-Score": 0,
+    "mirSVR-E": 0, "mirSVR-Aln": 0, "cHmmTssA": 0.0667, "cHmmTssAFlnk": 0.0667,
+    "cHmmTxFlnk": 0.0667, "cHmmTx": 0.0667, "cHmmTxWk": 0.0667,
+    "cHmmEnhG": 0.0667, "cHmmEnh": 0.0667, "cHmmZnfRpts": 0.0667,
+    "cHmmHet": 0.667, "cHmmTssBiv": 0.667, "cHmmBivFlnk": 0.0667,
+    "cHmmEnhBiv": 0.0667, "cHmmReprPC": 0.0667, "cHmmReprPCWk": 0.0667,
+    "cHmmQuies": 0.0667, "GerpRS": 0, "GerpRSpval": 0, "GerpN": 1.91,
+    "GerpS": -0.2, "TFBS": 0, "TFBSPeaks": 0, "TFBSPeaksMax": 0,
+    "tOverlapMotifs": 0, "motifDist": 0, "Segway": "unknown", "EncH3K27Ac": 0,
+    "EncH3K4Me1": 0, "EncH3K4Me3": 0, "EncExp": 0, "EncNucleo": 0, "EncOCC": 5,
+    "EncOCCombPVal": 0, "EncOCDNasePVal": 0, "EncOCFairePVal": 0,
+    "EncOCpolIIPVal": 0, "EncOCctcfPVal": 0, "EncOCmycPVal": 0,
+    "EncOCDNaseSig": 0, "EncOCFaireSig": 0, "EncOCpolIISig": 0,
+    "EncOCctcfSig": 0, "EncOCmycSig": 0, "Grantham": 0, "Dist2Mutation": 0,
+    "Freq100bp": 0, "Rare100bp": 0, "Sngl100bp": 0, "Freq1000bp": 0,
+    "Rare1000bp": 0, "Sngl1000bp": 0, "Freq10000bp": 0, "Rare10000bp": 0,
+    "Sngl10000bp": 0, "dbscSNV-ada_score": 0, "dbscSNV-rf_score": 0
+    }
+
+
+def read_impute_values(var_file):
+    """Read list of annotations and values."""
+    with open(var_file) as infile:
+        annotations = yaml.safe_load(infile)
+    return annotations
 
 
 def examine_nas(df):
@@ -86,9 +113,8 @@ def return_top10_or_less_categories(a_column, return_num=10):
     if len(value_counts) > return_num:
         print(value_counts.index[:return_num].values)
         return value_counts.index[:return_num].values
-    else:
-        print(value_counts.index.values)
-        return value_counts.index.values
+    print(value_counts.index.values)
+    return value_counts.index.values
 
 
 def process_categoricalvars(data, feat_cadd_object, isTrain=False, catFeats_levels_dict=None, catFeatNames_dict=None):
@@ -129,7 +155,7 @@ def preprocess(imputed_data, processed_savepath=None, isTrain=False, model_path=
         if model_path:
             model_features = pickle.load(open(model_path, 'rb')).feature_names
         elif model_features:
-            model_features=model_features
+            model_features = model_features
         else:
             print("In testing phase, features needs to be specified or pretrained models needs to be provided...")
         catFeatNames_dict = {}
@@ -141,8 +167,10 @@ def preprocess(imputed_data, processed_savepath=None, isTrain=False, model_path=
                         catFeatNames_dict[feature].append(expandedname)
                     else:
                         catFeatNames_dict[feature] = [expandedname]
-        processed_data = process_categoricalvars(imputed_data, feat_cadd_object=feat_cadd_object, isTrain=isTrain,
-                                 catFeatNames_dict=catFeatNames_dict)
+        processed_data = process_categoricalvars(
+            imputed_data, feat_cadd_object=feat_cadd_object,
+            isTrain=isTrain, catFeatNames_dict=catFeatNames_dict
+            )
         for col in model_features:
             if col not in processed_data:
                 processed_data[col] = 0
@@ -160,12 +188,12 @@ def make_predictions(preprocessed_data, prediction_savepath, model_path):
     input_matrix = xgb.DMatrix(preprocessed_data[model_features])
     preprocessed_data['probabilities'] = model.predict(input_matrix)
     preprocessed_data['ID'] = '.'
-    tellPathogenic_prediction = lambda x:"Pathogenic" if x > 0.02 else "Neutral"
+    tellPathogenic_prediction = lambda x: "Pathogenic" if x > 0.02 else "Neutral"
     preprocessed_data['prediction'] = [tellPathogenic_prediction(probability) for probability
                                        in preprocessed_data['probabilities']]
     tellPathogenic_combinedPrediction = lambda x: "Pathogenic" if x[0] > 0.02 or x[1] > 30 else "Neutral"
     preprocessed_data['combined_prediction'] = [tellPathogenic_combinedPrediction(probability) for probability
-                                       in preprocessed_data[['probabilities', 'PHRED']].values]
+                                                in preprocessed_data[['probabilities', 'PHRED']].values]
     save_columns = ['chr_pos_ref_alt', 'GeneName', 'Consequence', 'PHRED', 'probabilities', 'prediction', 'combined_prediction']
     save_file = preprocessed_data[save_columns]
     save_file = save_file.sort_values("probabilities", ascending=False).drop_duplicates('chr_pos_ref_alt')
@@ -177,35 +205,35 @@ def make_predictions(preprocessed_data, prediction_savepath, model_path):
 
 def check_input_columns(input_path):
     print("Reading CADD output file from :", input_path)
-    input = pd.read_csv(input_path, sep="\t", skiprows=1, compression="gzip")
-    print(input.head())
-    print("CADD output file loaded. File shape:", input.shape)
+    input_data = pd.read_csv(input_path, sep="\t", skiprows=1, compression="gzip")
+    print(input_data.head())
+    print("CADD output file loaded. File shape:", input_data.shape)
     for column in cadd_vars:
-        if column not in input:
+        if column not in input_data:
             raise IOError("Please annotate the file by CADD first.")
-    input['chr_pos_ref_alt'] = ['_'.join([str(ele) for ele in item]) for item
-                                in input[['#Chrom', 'Pos', 'Ref', 'Alt']].values]
-    return input
+    input_data['chr_pos_ref_alt'] = ['_'.join([str(ele) for ele in item])
+                                     for item in input_data[['#Chrom', 'Pos', 'Ref', 'Alt']].values]
+    return input_data
 
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input_path", dest="input_path", type=str)
-    parser.add_argument("--imputed_savepath", dest="imputed_savepath", type=str)
-    parser.add_argument("--processed_savepath", dest="processed_savepath", type=str)
-    parser.add_argument("--isTrain", dest='isTrain', type=bool)
-    parser.add_argument("--model_path", dest="model_path", type=str)
-    parser.add_argument("--prediction_savepath", dest='prediction_savepath', type=str)
-    parser.add_argument("--log_path", dest='log_path', type=str)
+    parser.add_argument("--input-path", dest="input_path", type=str)
+    parser.add_argument("--imputed-savepath", dest="imputed_savepath", type=str)
+    parser.add_argument("--processed-savepath", dest="processed_savepath", type=str)
+    parser.add_argument("--is-train", dest='is_train', action="store_true")
+    parser.add_argument("--model-path", dest="model_path", type=str)
+    parser.add_argument("--prediction-savepath", dest='prediction_savepath', type=str)
+    parser.add_argument("--log-path", dest='log_path', type=str)
     args = parser.parse_args()
 
     # sys.stdout = open("%s"%args.log_path, "w")
     print("Input file is:", args.input_path)
-    if args.isTrain == 'True':
-        isTrain = True
-    else:
-        isTrain = False
-    input = check_input_columns(args.input_path)
-    preprocessed_data = preprocess(imputed_data=impute(input), isTrain=isTrain, model_path=args.model_path)
+    input_data = check_input_columns(args.input_path)
+    preprocessed_data = preprocess(imputed_data=impute(input_data), isTrain=args.is_train, model_path=args.model_path)
     _ = make_predictions(preprocessed_data, args.prediction_savepath, args.model_path)
     # sys.stdout.close()
+
+
+if __name__ == "__main__":
+    main()
