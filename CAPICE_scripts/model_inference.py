@@ -7,6 +7,88 @@ import pandas as pd
 import xgboost as xgb
 
 
+class Capice_Run:
+    """Object storing CAPICE analysis run data."""
+
+    def __init__(self, CADD_file, impute_values_yaml="cadd_vars.yaml",
+                 exceptions=None):
+        self.impute_values = self.read_impute_values(impute_values_yaml)
+        if exceptions is None:
+            exceptions = set()
+        self.CADD_annotations = (set(self.impute_values.keys())
+                                 - set(exceptions))
+        self.CADD_data = self.read_CADD_input(CADD_file)
+
+    @staticmethod
+    def read_impute_values(impute_values_yaml):
+        """Read list of annotations and values."""
+        with open(impute_values_yaml) as infile:
+            annotations = yaml.safe_load(infile)
+        return annotations
+
+    def read_CADD_input(self, CADD_file):
+        CADD_data = pd.read_csv(CADD_file, sep="\t", skiprows=1,
+                                compression="gzip")
+        print(f"Read {CADD_data.shape[0]} rows and "
+              "{CADD_data.shape[1]} columns.")
+        self.check_input_columns(CADD_data)
+        CADD_data["chr_pos_ref_alt"] = [
+            "_".join([str(field) for field in column])
+            for column in CADD_data[["#Chrom", "Pos", "Ref", "Alt"]].values
+            ]
+        return CADD_data
+
+    def check_input_columns(self, CADD_data):
+        # reqd_vars = read_impute_values(var_file)
+        if not set(CADD_data).issuperset(self.CADD_annotations):
+            raise IOError("Please annotate the file with CADD first.")
+        return
+
+# XXX: Change this to alter attribute in place and return None.
+    def impute(self, imputed_savepath=None):
+        new_data = self.CADD_data
+        new_data = new_data.dropna(subset=self.CADD_annotations, how="all")
+        new_dbscSNV_scores = []
+        for value in new_data["dbscSNV-rf_score"]:
+            if pd.isnull(value) or value == ".":
+                new_dbscSNV_scores.append(np.nan)
+            else:
+                new_dbscSNV_scores.append(float(value))
+        new_data["dbscSNV-rf_score"] = new_dbscSNV_scores
+        new_data = new_data.dropna(how="all")
+        print(f"Removed {self.CADD_data.shape[0] - new_data.shape[0]} "
+              " variants with no annotations.")
+
+        print("Null ratios before imputation:\n")
+        self.examine_nas()
+        self.replace_nas(new_data)
+        print("Null ratios after imputation:\n")
+        self.examine_nas()
+        
+        if imputed_savepath:
+            new_data.to_csv(imputed_savepath, index=False)
+            print(f"Saved imputed raw file to {imputed_savepath}")
+        return new_data
+
+    def examine_nas(self):
+        variant_count = self.CADD_data.shape[0]
+        null_ratios = {}
+        print(f"{'Annotation':18} {'Null_Count':10}  Ratio")
+        for col in self.CADD_data[self.CADD_annotations].columns:
+            null_count = self.CADD_data[col].isnull().sum()
+            if null_count > 0:
+                ratio = null_count / variant_count
+                null_ratios[col] = ratio
+                print(f"{col:18} {null_count:10}   {ratio:0.2f}")
+        return null_ratios
+
+
+    def replace_nas(self, dataframe):
+        for column in dataframe.columns:
+            if dataframe[column].isna().any() and column in self.impute_values:
+                dataframe[column].fillna(self.impute_values[column], inplace=True)
+        return
+
 cadd_vars = [
     "Ref", "Alt", "Type", "Length", "GC", "CpG", "motifECount",
     "motifEScoreChng", "motifEHIPos", "oAA", "nAA", "cDNApos", "relcDNApos",
@@ -58,11 +140,63 @@ impute_values = {
     }
 
 
-def read_impute_values(var_file):
-    """Read list of annotations and values."""
-    with open(var_file) as infile:
-        annotations = yaml.safe_load(infile)
-    return annotations
+def examine_nas(df):
+    variant_count = df.shape[0]
+    null_ratios = {}
+    print(f"{'Annotation':18} {'Null_Count':10}  Ratio")
+    for col in df.columns:
+        null_count = df[col].isnull().sum()
+        if null_count > 0:
+            ratio = null_count / variant_count
+            null_ratios[col] = ratio
+            print(f"{col:18} {null_count:10}   {ratio:0.2f}")
+    # return null_ratios
+
+
+def read_CADD_input(CADD_file):
+    # print(f"Reading CADD output file from: {CADD_file}")
+    CADD_data = pd.read_csv(CADD_file, sep="\t", skiprows=1, compression="gzip")
+    # print(CADD_data.head())
+    # print("CADD output file loaded. File shape:", CADD_data.shape)
+    check_input_columns(CADD_data)
+    CADD_data["chr_pos_ref_alt"] = [
+        "_".join([str(field) for field in column])
+        for column in CADD_data[["#Chrom", "Pos", "Ref", "Alt"]].values
+        ]
+    return CADD_data
+
+
+def check_input_columns(CADD_data):
+    # reqd_vars = read_impute_values(var_file)
+    reqd_vars = cadd_vars
+    if set(reqd_vars).issubset(set(cadd_vars)):
+        return True
+    raise IOError("Please annotate the file by CADD first.")
+
+
+def impute(df, imputed_savepath=None):
+    original_shape = df.shape
+    df = df.dropna(subset=cadd_vars, how="all")
+    print("Removed {} variants with no parameters.")
+    new_dbscSNV_scores = []
+    for value in df["dbscSNV-rf_score"]:
+        if pd.isnull(value) or value == ".":
+            new_dbscSNV_scores.append(np.nan)
+        else:
+            new_dbscSNV_scores.append(float(value))
+    df["dbscSNV-rf_score"] = new_dbscSNV_scores
+    df = df.dropna(how="all")
+    print("Raw data loaded, shape: ", df.shape)
+    print("Before imputation, null ratio: \n")
+    _ = examine_nas(df[cadd_vars])
+    # save null ratios
+    df = replace_nas(df, impute_values)
+    print("After imputation, there shouldn't be any nulls, but check below:\n")
+    _ = examine_nas(df)
+    if imputed_savepath:
+        df.to_csv(imputed_savepath, index=False)
+        print(f"Saved imputed raw file to {imputed_savepath}")
+    return df
 
 
 def examine_nas(df):
@@ -82,29 +216,6 @@ def replace_nas(df, Dict):
             df[value].fillna(impute_values[value], inplace=True)
         else:
             continue
-    return df
-
-
-def impute(df, imputed_savepath=None):
-    print(type(df))
-    print("Readin data shape: ", df.shape)
-    print(df.head())
-    df = df.dropna(subset=cadd_vars, how="all")
-    print("Remove samples with no parameters, shape: ", df.shape)
-    func = lambda x: np.nan if pd.isnull(x) or x == "." else float(x)
-    values = df["dbscSNV-rf_score"].values
-    df["dbscSNV-rf_score"] = [func(item) for item in values]
-    df = df.dropna(how="all")
-    print("Raw data loaded, shape: ", df.shape)
-    print("Before imputation, null ratio: \n")
-    _ = examine_nas(df[cadd_vars])
-    # save null ratios
-    df = replace_nas(df, impute_values)
-    print("After imputation, there shouldn't be any nulls, but check below: \n")
-    _ = examine_nas(df)
-    if imputed_savepath:
-        df.to_csv(imputed_savepath, index=False)
-        print("Saved imputed raw file to %s" % imputed_savepath)
     return df
 
 
@@ -203,19 +314,6 @@ def make_predictions(preprocessed_data, prediction_savepath, model_path):
     return save_file
 
 
-def check_input_columns(input_path):
-    print("Reading CADD output file from :", input_path)
-    input_data = pd.read_csv(input_path, sep="\t", skiprows=1, compression="gzip")
-    print(input_data.head())
-    print("CADD output file loaded. File shape:", input_data.shape)
-    for column in cadd_vars:
-        if column not in input_data:
-            raise IOError("Please annotate the file by CADD first.")
-    input_data['chr_pos_ref_alt'] = ['_'.join([str(ele) for ele in item])
-                                     for item in input_data[['#Chrom', 'Pos', 'Ref', 'Alt']].values]
-    return input_data
-
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input-path", dest="input_path", type=str)
@@ -228,9 +326,11 @@ def main():
     args = parser.parse_args()
 
     # sys.stdout = open("%s"%args.log_path, "w")
-    print("Input file is:", args.input_path)
-    input_data = check_input_columns(args.input_path)
+    # print("Input file is:", args.input_path)
+    input_data = read_CADD_input(args.input_path)
+
     preprocessed_data = preprocess(imputed_data=impute(input_data), isTrain=args.is_train, model_path=args.model_path)
+
     _ = make_predictions(preprocessed_data, args.prediction_savepath, args.model_path)
     # sys.stdout.close()
 
